@@ -10,6 +10,7 @@
 
     <extensions defaultExtensionNs="com.intellij">
         <applicationService serviceImplementation="com.example.aicommit.settings.AiCommitSettingsService"/>
+        <projectService serviceImplementation="com.example.aicommit.qualitygate.runtime.FrontendCheckRuntimeService"/>
         <notificationGroup id="AI Commit Notifications" displayType="BALLOON" isLogByDefault="false"/>
         <applicationConfigurable
                 id="com.example.aicommit.settings"
