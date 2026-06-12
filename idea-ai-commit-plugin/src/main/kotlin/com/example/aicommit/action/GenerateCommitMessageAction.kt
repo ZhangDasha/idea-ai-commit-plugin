@@ -1,10 +1,16 @@
 package com.example.aicommit.action
 
 import com.example.aicommit.git.GitDiffCollector
+import com.example.aicommit.qualitygate.detect.FrontendProjectDetector
+import com.example.aicommit.qualitygate.resolve.FrontendCheckCommandResolver
+import com.example.aicommit.qualitygate.run.FrontendCheckRunner
+import com.example.aicommit.qualitygate.runtime.FrontendCheckRuntimeService
+import com.example.aicommit.qualitygate.service.FrontendQualityGateService
 import com.example.aicommit.service.CommitGenerationRequest
 import com.example.aicommit.service.CommitMessageGenerationService
 import com.example.aicommit.settings.AiCommitSettingsService
 import com.example.aicommit.ui.AiCommitNotifications
+import com.example.aicommit.ui.QualityGateDialog
 import com.intellij.openapi.actionSystem.ActionUpdateThread
 import com.intellij.openapi.actionSystem.AnAction
 import com.intellij.openapi.actionSystem.AnActionEvent
@@ -17,7 +23,6 @@ import com.intellij.openapi.vcs.VcsDataKeys
 import com.intellij.openapi.vcs.changes.Change
 import com.intellij.openapi.vcs.FilePath
 import com.intellij.openapi.vcs.ui.CommitMessage
-import com.intellij.vcs.commit.CommitWorkflowUi
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
@@ -74,8 +79,37 @@ class GenerateCommitMessageAction : AnAction() {
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating commit message", true) {
             override fun run(indicator: ProgressIndicator) {
                 val diff = gitDiffCollector.collectWithUnifiedDiff(project, includedChanges, unversionedFiles)
-                val buffer = StringBuilder()
 
+                // 前端质量闸口检查
+                var warningSummary: String? = null
+                if (state.frontendChecksEnabled) {
+                    val gateService = createQualityGateService(settingsService, project)
+                    val changedPaths = includedChanges.mapNotNull { it.virtualFile?.path } +
+                        unversionedFiles.map { it.path }
+                    val gateResult = gateService.evaluate(project, changedPaths)
+
+                    // 严重问题弹窗确认
+                    if (gateResult.requiresConfirmation) {
+                        var accepted = false
+                        ApplicationManager.getApplication().invokeAndWait {
+                            accepted = QualityGateDialog(project, gateResult).showAndGet()
+                        }
+                        if (!accepted) {
+                            ApplicationManager.getApplication().invokeLater {
+                                commitMessage.setCommitMessage(originalMessage ?: "")
+                                isGenerating.set(false)
+                            }
+                            return
+                        }
+                    }
+
+                    // 附加 warning 摘要到 prompt
+                    if (state.includeWarningSummaryInPrompt) {
+                        warningSummary = gateResult.warningSummaryForPrompt
+                    }
+                }
+
+                val buffer = StringBuilder()
                 val request = CommitGenerationRequest(
                     diff = diff,
                     language = state.language,
@@ -84,7 +118,8 @@ class GenerateCommitMessageAction : AnAction() {
                     model = state.model,
                     promptTemplate = state.promptTemplate,
                     connectTimeout = state.connectTimeoutMillis,
-                    readTimeout = state.readTimeoutMillis
+                    readTimeout = state.readTimeoutMillis,
+                    warningSummary = warningSummary
                 )
 
                 try {
@@ -111,5 +146,18 @@ class GenerateCommitMessageAction : AnAction() {
                 }
             }
         })
+    }
+
+    /** 创建质量闸口服务 */
+    private fun createQualityGateService(
+        settingsService: AiCommitSettingsService,
+        project: com.intellij.openapi.project.Project
+    ): FrontendQualityGateService {
+        val runtimeService = project.service<FrontendCheckRuntimeService>()
+        return FrontendQualityGateService(
+            detector = FrontendProjectDetector(),
+            resolver = FrontendCheckCommandResolver(settingsService),
+            runner = FrontendCheckRunner(runtimeService)
+        )
     }
 }
