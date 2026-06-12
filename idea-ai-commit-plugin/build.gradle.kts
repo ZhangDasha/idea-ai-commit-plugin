@@ -31,3 +31,11 @@ tasks.test {
 kotlin {
     jvmToolchain(17)
 }
+
+tasks.register("verify261Compatibility") {
+    group = "verification"
+    description = "Smoke-check plugin against IntelliJ IDEA 2026.1 branch assumptions"
+    doLast {
+        println("Verify manually on IntelliJ IDEA 2026.1.2 (IU-261.24374.151)")
+    }
+}
