@@ -14,7 +14,8 @@ data class CommitGenerationRequest(
     val model: String,
     val promptTemplate: String,
     val connectTimeout: Int = 10_000,
-    val readTimeout: Int = 60_000
+    val readTimeout: Int = 60_000,
+    val warningSummary: String? = null
 )
 
 /**
@@ -30,7 +31,7 @@ class CommitMessageGenerationService(
      * @param onChunk 流式回调（用于 UI 逐步回填）
      */
     fun generate(request: CommitGenerationRequest, onChunk: (String) -> Unit): String {
-        val prompt = promptBuilder.build(request.promptTemplate, request.language, request.diff)
+        val prompt = promptBuilder.build(request.promptTemplate, request.language, request.diff, request.warningSummary)
         val buffer = StringBuilder()
 
         client.streamChat(

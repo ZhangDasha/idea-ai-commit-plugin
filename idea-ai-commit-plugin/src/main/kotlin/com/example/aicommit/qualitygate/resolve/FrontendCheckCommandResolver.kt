@@ -18,7 +18,7 @@ data class ResolvedFrontendCommands(
  * 1. 优先从 package.json scripts 中自动识别
  * 2. 回退到插件设置中的项目级手动配置
  */
-class FrontendCheckCommandResolver(
+open class FrontendCheckCommandResolver(
     private val settingsService: AiCommitSettingsService
 ) {
 
@@ -32,7 +32,7 @@ class FrontendCheckCommandResolver(
      * @param projectRoot 项目根目录
      * @param packageScripts package.json 中的 scripts 映射
      */
-    fun resolve(projectRoot: String, packageScripts: Map<String, String>): ResolvedFrontendCommands {
+    open fun resolve(projectRoot: String, packageScripts: Map<String, String>): ResolvedFrontendCommands {
         val config = settingsService.findFrontendProjectConfig(projectRoot)
 
         val typescript = findScript(packageScripts, typescriptScriptNames)

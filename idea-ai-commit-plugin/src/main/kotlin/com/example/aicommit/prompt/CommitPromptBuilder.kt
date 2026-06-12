@@ -5,12 +5,17 @@ package com.example.aicommit.prompt
  */
 class CommitPromptBuilder {
 
-    fun build(template: String, language: String, diff: String): String {
+    fun build(template: String, language: String, diff: String, warningSummary: String? = null): String {
         require(template.contains("{diff}")) { "Prompt 必须包含 {diff}" }
-        return template
+        val base = template
             .replace("{language}", language)
             .replace("{diff}", diff)
-            .trim()
+        if (warningSummary.isNullOrBlank()) return base.trim()
+        return buildString {
+            append(base.trim())
+            append("\n\n附加上下文（仅供参考，不必在提交说明中直接体现）：\n")
+            append(warningSummary)
+        }
     }
 
     companion object {

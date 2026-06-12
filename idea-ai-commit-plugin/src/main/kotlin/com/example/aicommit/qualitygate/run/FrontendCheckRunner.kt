@@ -13,7 +13,7 @@ import com.example.aicommit.qualitygate.runtime.FrontendCheckRuntimeService
  * - 截断输出防止内存溢出
  * - 根据退出码和检查类型判定严重级别
  */
-class FrontendCheckRunner(
+open class FrontendCheckRunner(
     private val runtimeService: FrontendCheckRuntimeService,
     private val launcher: CommandLauncher = OsCommandLauncher()
 ) {
@@ -30,7 +30,7 @@ class FrontendCheckRunner(
      * @param command 要执行的命令
      * @param timeoutMillis 超时时间
      */
-    fun run(
+    open fun run(
         projectRoot: String,
         type: FrontendCheckType,
         command: String,
