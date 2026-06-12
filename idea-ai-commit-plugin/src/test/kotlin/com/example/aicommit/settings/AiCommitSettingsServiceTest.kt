@@ -59,4 +59,16 @@ class AiCommitSettingsServiceTest {
         val error = service.validate(state, "sk-xxx")
         assertNull(error)
     }
+
+    @Test
+    fun `validateFrontendCheckSettings should reject non positive timeout`() {
+        val state = AiCommitSettingsState(
+            connectTimeoutMillis = 10_000,
+            readTimeoutMillis = 60_000,
+            frontendChecksEnabled = true,
+            frontendCheckTimeoutMillis = 0
+        )
+        val error = service.validate(state, "sk-xxx")
+        assertEquals("前端检查超时时间必须大于 0", error)
+    }
 }

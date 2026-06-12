@@ -3,6 +3,7 @@ package com.example.aicommit.settings
 import com.intellij.openapi.components.service
 import com.intellij.openapi.options.Configurable
 import com.intellij.openapi.application.ReadAction
+import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBPasswordField
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
@@ -22,6 +23,10 @@ class AiCommitSettingsConfigurable : Configurable {
     private val modelField = JBTextField()
     private val languageField = javax.swing.JComboBox(arrayOf("Chinese", "English"))
     private val promptArea = JBTextArea(8, 40)
+    // 前端检查相关控件
+    private val frontendChecksEnabledBox = JBCheckBox("启用获取 AI Commit 前前端检查")
+    private val frontendCheckTimeoutField = JBTextField()
+    private val includeWarningSummaryBox = JBCheckBox("存在警告时将摘要附加到 Prompt")
 
     override fun getDisplayName(): String = "AI Commit"
 
@@ -31,6 +36,11 @@ class AiCommitSettingsConfigurable : Configurable {
         row("Model") { cell(modelField).align(AlignX.FILL) }
         row("Language") { cell(languageField) }
         row("Prompt Template") { scrollCell(promptArea).align(AlignX.FILL) }
+        group("Frontend Checks") {
+            row { cell(frontendChecksEnabledBox) }
+            row("Timeout(ms)") { cell(frontendCheckTimeoutField).align(AlignX.FILL) }
+            row { cell(includeWarningSummaryBox) }
+        }
     }
 
     override fun reset() {
@@ -40,8 +50,11 @@ class AiCommitSettingsConfigurable : Configurable {
         languageField.model = DefaultComboBoxModel(arrayOf("Chinese", "English"))
         languageField.selectedItem = state.language
         promptArea.text = state.promptTemplate
-        // PasswordSafe 读取可能触发 SlowOperations，用 ReadAction 包裹
         apiKeyField.text = ReadAction.compute<String, Exception> { settingsService.getApiKey() }
+        // 前端检查设置回填
+        frontendChecksEnabledBox.isSelected = state.frontendChecksEnabled
+        frontendCheckTimeoutField.text = state.frontendCheckTimeoutMillis.toString()
+        includeWarningSummaryBox.isSelected = state.includeWarningSummaryInPrompt
     }
 
     override fun isModified(): Boolean {
@@ -52,6 +65,9 @@ class AiCommitSettingsConfigurable : Configurable {
                 || languageField.selectedItem != state.language
                 || promptArea.text != state.promptTemplate
                 || String(apiKeyField.password) != savedKey
+                || frontendChecksEnabledBox.isSelected != state.frontendChecksEnabled
+                || frontendCheckTimeoutField.text != state.frontendCheckTimeoutMillis.toString()
+                || includeWarningSummaryBox.isSelected != state.includeWarningSummaryInPrompt
     }
 
     override fun apply() {
@@ -61,5 +77,9 @@ class AiCommitSettingsConfigurable : Configurable {
         state.language = languageField.selectedItem as String
         state.promptTemplate = promptArea.text
         settingsService.setApiKey(String(apiKeyField.password))
+        // 保存前端检查设置
+        state.frontendChecksEnabled = frontendChecksEnabledBox.isSelected
+        state.frontendCheckTimeoutMillis = frontendCheckTimeoutField.text.toIntOrNull() ?: 20_000
+        state.includeWarningSummaryInPrompt = includeWarningSummaryBox.isSelected
     }
 }

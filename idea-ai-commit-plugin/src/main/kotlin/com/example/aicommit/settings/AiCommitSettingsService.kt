@@ -45,6 +45,12 @@ class AiCommitSettingsService : PersistentStateComponent<AiCommitSettingsState> 
         if (apiKey.isBlank()) return "API Key 不能为空"
         if (state.model.isBlank()) return "Model 不能为空"
         if (!state.promptTemplate.contains("{diff}")) return "Prompt 必须包含 {diff}"
+        if (state.frontendCheckTimeoutMillis <= 0) return "前端检查超时时间必须大于 0"
         return null
+    }
+
+    /** 按项目根目录查找前端检查配置 */
+    fun findFrontendProjectConfig(projectRoot: String): com.example.aicommit.qualitygate.config.FrontendProjectCheckConfig? {
+        return state.frontendProjectConfigs.firstOrNull { it.projectRoot == projectRoot }
     }
 }
