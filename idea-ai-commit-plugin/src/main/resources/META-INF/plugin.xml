@@ -1,0 +1,31 @@
+<idea-plugin>
+    <id>com.example.aicommit</id>
+    <idea-version since-build="241" until-build="261.*"/>
+    <name>IDEA AI Commit</name>
+    <vendor email="dev@example.com">example</vendor>
+
+    <depends>com.intellij.modules.platform</depends>
+    <depends>com.intellij.modules.vcs</depends>
+    <depends optional="true">Git4Idea</depends>
+
+    <extensions defaultExtensionNs="com.intellij">
+        <applicationService serviceImplementation="com.example.aicommit.settings.AiCommitSettingsService"/>
+        <notificationGroup id="AI Commit Notifications" displayType="BALLOON" isLogByDefault="false"/>
+        <applicationConfigurable
+                id="com.example.aicommit.settings"
+                displayName="AI Commit"
+                parentId="tools"
+                instance="com.example.aicommit.settings.AiCommitSettingsConfigurable"/>
+    </extensions>
+
+    <actions>
+        <action
+                id="com.example.aicommit.action.GenerateCommitMessageAction"
+                class="com.example.aicommit.action.GenerateCommitMessageAction"
+                text="Generate AI Commit Message"
+                description="Generate commit message with DeepSeek"
+                icon="/icons/aiCommit.svg">
+            <add-to-group group-id="Vcs.MessageActionGroup" anchor="after" relative-to-action="Vcs.ShowMessageHistory"/>
+        </action>
+    </actions>
+</idea-plugin>
