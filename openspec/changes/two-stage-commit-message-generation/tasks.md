@@ -25,12 +25,12 @@
 
 ## 3. 批次 C：本地规则 + 第二阶段 + 校验
 
-- [ ] 3.1 新增 `service/CommitRuleScorer.kt`：docs/test 强制、scope 收敛、空洞 intent 降级、低置信度标记
-- [ ] 3.2 新增测试 `service/CommitRuleScorerTest`（docs/test/refactor + 模块分散 + 低置信度）
-- [ ] 3.3 新增 `service/CommitMessageComposerService.kt`：基于 `ScoredCommitIntent` 流式生成 Conventional Commits 文本
-- [ ] 3.4 新增 `service/CommitMessageValidator.kt`：`validateOrFallback`（空→fallback、Markdown/代码块→拒绝、正则→拒绝）+ `buildFallback`
-- [ ] 3.5 新增测试 `service/CommitMessageComposerServiceTest` + `service/CommitMessageValidatorTest`
-- [ ] 3.6 跑 `./gradlew test` 通过后 commit：`feat: add rule scorer composer and validator`
+- [x] 3.1 新增 `service/CommitRuleScorer.kt`：docs/test 强制、scope 收敛、空洞 intent 降级、低置信度标记
+- [x] 3.2 新增测试 `service/CommitRuleScorerTest`（docs/test/refactor + 模块分散 + 低置信度）
+- [x] 3.3 新增 `service/CommitMessageComposerService.kt`：基于 `ScoredCommitIntent` 流式生成 Conventional Commits 文本
+- [x] 3.4 新增 `service/CommitMessageValidator.kt`：`validateOrFallback`（空→fallback、Markdown/代码块→拒绝、正则→拒绝）+ `buildFallback`
+- [x] 3.5 新增测试 `service/CommitMessageComposerServiceTest` + `service/CommitMessageValidatorTest`
+- [x] 3.6 跑 `./gradlew test` 通过后 commit：`feat: add rule scorer composer and validator`
 
 ## 4. 批次 D：编排串联（Request 字段 BREAKING，service 与 Action 必须同批）
 
