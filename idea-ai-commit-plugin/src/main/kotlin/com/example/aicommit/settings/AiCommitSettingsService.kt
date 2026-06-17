@@ -44,6 +44,12 @@ class AiCommitSettingsService : PersistentStateComponent<AiCommitSettingsState> 
         if (state.baseUrl.isBlank()) return "Base URL 不能为空"
         if (apiKey.isBlank()) return "API Key 不能为空"
         if (state.model.isBlank()) return "Model 不能为空"
+        // 两阶段生成新字段校验
+        if (state.analysisModel.isBlank()) return "Analysis Model 不能为空"
+        if (state.composerModel.isBlank()) return "Composer Model 不能为空"
+        if (state.confidenceThreshold !in 0.0..1.0) return "Confidence Threshold 必须在 0 到 1 之间"
+        if (state.maxFiles <= 0) return "Max Files 必须大于 0"
+        if (state.maxHunksPerFile <= 0) return "Max Hunks Per File 必须大于 0"
         if (!state.promptTemplate.contains("{diff}")) return "Prompt 必须包含 {diff}"
         return null
     }

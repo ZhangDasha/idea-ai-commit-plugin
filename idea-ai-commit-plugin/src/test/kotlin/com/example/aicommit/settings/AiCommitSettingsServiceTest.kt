@@ -59,4 +59,26 @@ class AiCommitSettingsServiceTest {
         val error = service.validate(state, "sk-xxx")
         assertNull(error)
     }
+
+    @Test
+    fun `state should expose two stage defaults`() {
+        val state = AiCommitSettingsState()
+        assertEquals("deepseek-chat", state.analysisModel)
+        assertEquals("deepseek-chat", state.composerModel)
+        assertEquals(0.55, state.confidenceThreshold)
+        assertEquals(12, state.maxFiles)
+        assertEquals(3, state.maxHunksPerFile)
+    }
+
+    @Test
+    fun `validate should reject out of range confidence threshold`() {
+        val state = AiCommitSettingsState().copy(confidenceThreshold = 1.5)
+        assertEquals("Confidence Threshold 必须在 0 到 1 之间", service.validate(state, "sk-xxx"))
+    }
+
+    @Test
+    fun `validate should reject non positive max files`() {
+        val state = AiCommitSettingsState().copy(maxFiles = 0)
+        assertEquals("Max Files 必须大于 0", service.validate(state, "sk-xxx"))
+    }
 }

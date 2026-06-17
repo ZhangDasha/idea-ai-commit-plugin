@@ -1,5 +1,7 @@
 package com.example.aicommit.git
 
+import com.example.aicommit.model.ChangeStatus
+import com.example.aicommit.model.StructuredDiff
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vcs.changes.Change
 import com.intellij.openapi.vcs.FilePath
@@ -85,6 +87,64 @@ class GitDiffCollector(private val limits: DiffLimits = DiffLimits()) {
         }
 
         return truncate(patchBuilder.toString())
+    }
+
+    /**
+     * 结构化收集：从勾选变更构建 StructuredDiff（文件摘要 + 关键 hunk + 预算裁剪）。
+     * 复用统一 diff 与未跟踪文件 patch 化逻辑，产出 PatchInput 后交 StructuredDiffBuilder 裁剪。
+     */
+    fun collectStructured(
+        project: Project,
+        includedChanges: List<Change>,
+        unversionedFiles: List<FilePath>,
+        maxFiles: Int,
+        maxHunksPerFile: Int
+    ): StructuredDiff {
+        val gitRoot = findGitRoot(project)
+            ?: return StructuredDiff(emptyList(), emptyList(), false, 0, 0, 0)
+        val patchInputs = collectPatchInputs(gitRoot, includedChanges, unversionedFiles)
+        return StructuredDiffBuilder(limits).buildFromPatch(patchInputs, maxFiles, maxHunksPerFile)
+    }
+
+    /** 汇总已跟踪 + 未跟踪文件的 patch 输入，跳过二进制/大文件，统一为相对路径 */
+    private fun collectPatchInputs(
+        gitRoot: File,
+        includedChanges: List<Change>,
+        unversionedFiles: List<FilePath>
+    ): List<PatchInput> {
+        val rootPath = File(gitRoot.path).toPath()
+
+        // 已跟踪变更：逐文件取 unified diff，按 before/after 推断状态
+        val tracked = includedChanges.mapNotNull { change ->
+            val path = change.virtualFile?.path ?: change.beforeRevision?.file?.path ?: return@mapNotNull null
+            if (shouldSkipFile(path)) return@mapNotNull null
+            val relativePath = rootPath.relativize(File(path).toPath()).toString().replace('\\', '/')
+            val patch = gitDiff(gitRoot, "HEAD", "--unified=${limits.contextLines}", "--", relativePath)
+            val status = when {
+                change.beforeRevision == null && change.afterRevision != null -> ChangeStatus.ADDED
+                change.afterRevision == null -> ChangeStatus.DELETED
+                else -> ChangeStatus.MODIFIED
+            }
+            PatchInput(relativePath, status, patch)
+        }
+
+        // 未跟踪文件：直接读取内容构造新增 patch
+        val untracked = unversionedFiles.mapNotNull { file ->
+            if (shouldSkipFile(file.path)) return@mapNotNull null
+            val nioPath = Paths.get(file.path)
+            if (!Files.exists(nioPath) || Files.size(nioPath) > limits.maxUnversionedBytes) return@mapNotNull null
+            val relativePath = rootPath.relativize(nioPath).toString().replace('\\', '/')
+            val lines = Files.readAllLines(nioPath)
+            val patch = buildString {
+                append("--- /dev/null\n")
+                append("+++ b/").append(relativePath).append('\n')
+                append("@@ -0,0 +1,").append(lines.size).append(" @@\n")
+                lines.forEach { append('+').append(it).append('\n') }
+            }
+            PatchInput(relativePath, ChangeStatus.ADDED, patch)
+        }
+
+        return tracked + untracked
     }
 
     /** 执行 git diff 命令，返回标准 diff 文本 */
