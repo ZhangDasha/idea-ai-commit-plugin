@@ -7,7 +7,7 @@ import java.net.URI
 /**
  * DeepSeek 流式聊天客户端，兼容 OpenAI chat completions 协议
  */
-class DeepSeekClient(
+open class DeepSeekClient(
     private val objectMapper: ObjectMapper = ObjectMapper()
 ) {
 
@@ -24,7 +24,7 @@ class DeepSeekClient(
      * 发起流式 chat 请求
      * @param onChunk 每收到一个 chunk 回调一次
      */
-    fun streamChat(
+    open fun streamChat(
         baseUrl: String,
         apiKey: String,
         model: String,

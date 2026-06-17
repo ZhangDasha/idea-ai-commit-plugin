@@ -2,35 +2,31 @@ package com.example.aicommit.prompt
 
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertTrue
 
 class CommitPromptBuilderTest {
 
     @Test
-    fun `build should replace language and diff placeholders`() {
+    fun `default template should contain key guidance phrases`() {
+        val tpl = CommitPromptBuilder.DEFAULT_TEMPLATE
+        assertTrue(tpl.contains("阅读以下代码变更"))
+        assertTrue(tpl.contains("使用 {language}"))
+        assertTrue(tpl.contains("subject 不超过 50 个字符"))
+        assertTrue(tpl.contains("代码变更：\n{diff}"))
+        assertTrue(tpl.contains("严禁输出代码块"))
+    }
+
+    @Test
+    fun `build should replace placeholders with default template`() {
         val builder = CommitPromptBuilder()
         val prompt = builder.build(
-            template = "用{language}生成提交说明：{diff}",
-            language = "中文",
-            diff = "diff --git a.txt b.txt"
+            CommitPromptBuilder.DEFAULT_TEMPLATE,
+            "中文",
+            "diff --git a.txt b.txt"
         )
-        assertEquals("用中文生成提交说明：diff --git a.txt b.txt", prompt)
-    }
-
-    @Test
-    fun `build should throw when template missing diff placeholder`() {
-        val builder = CommitPromptBuilder()
-        try {
-            builder.build("no placeholder", "中文", "diff")
-            throw AssertionError("Expected IllegalArgumentException")
-        } catch (e: IllegalArgumentException) {
-            assertEquals("Prompt 必须包含 {diff}", e.message)
-        }
-    }
-
-    @Test
-    fun `build should trim result`() {
-        val builder = CommitPromptBuilder()
-        val prompt = builder.build("  {diff}  ", "中文", "content")
-        assertEquals("content", prompt)
+        assertTrue(prompt.contains("使用 中文"))
+        assertTrue(prompt.contains("代码变更：\ndiff --git a.txt b.txt"))
+        assertEquals(false, prompt.contains("{language}"))
+        assertEquals(false, prompt.contains("{diff}"))
     }
 }
