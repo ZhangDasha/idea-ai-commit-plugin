@@ -73,32 +73,39 @@ class GenerateCommitMessageAction : AnAction() {
 
         ProgressManager.getInstance().run(object : Task.Backgroundable(project, "Generating commit message", true) {
             override fun run(indicator: ProgressIndicator) {
-                val diff = gitDiffCollector.collectWithUnifiedDiff(project, includedChanges, unversionedFiles)
+                // 结构化 diff（后台线程构建），替代整段 raw diff
+                val structuredDiff = gitDiffCollector.collectStructured(
+                    project = project,
+                    includedChanges = includedChanges,
+                    unversionedFiles = unversionedFiles,
+                    maxFiles = state.maxFiles,
+                    maxHunksPerFile = state.maxHunksPerFile
+                )
                 val buffer = StringBuilder()
 
                 val request = CommitGenerationRequest(
-                    diff = diff,
+                    structuredDiff = structuredDiff,
                     language = state.language,
                     baseUrl = state.baseUrl,
                     apiKey = apiKey,
-                    model = state.model,
-                    promptTemplate = state.promptTemplate,
+                    analysisModel = state.analysisModel,
+                    composerModel = state.composerModel,
+                    confidenceThreshold = state.confidenceThreshold,
                     connectTimeout = state.connectTimeoutMillis,
                     readTimeout = state.readTimeoutMillis
                 )
 
                 try {
+                    // 两阶段生成：onChunk 仅回填第二阶段流式输出
                     val finalMessage = generationService.generate(request) { chunk ->
                         buffer.append(chunk)
                         ApplicationManager.getApplication().invokeLater {
                             commitMessage.setCommitMessage(buffer.toString())
                         }
                     }
-
-                    // 校验结果非空
-                    val usable = generationService.ensureUsableMessage(finalMessage)
+                    // 最终结果（已校验/回退）覆盖回填，保证显示合法文案
                     ApplicationManager.getApplication().invokeLater {
-                        commitMessage.setCommitMessage(usable)
+                        commitMessage.setCommitMessage(finalMessage)
                     }
                 } catch (ex: Exception) {
                     ApplicationManager.getApplication().invokeLater {

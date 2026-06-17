@@ -34,12 +34,12 @@
 
 ## 4. 批次 D：编排串联（Request 字段 BREAKING，service 与 Action 必须同批）
 
-- [ ] 4.1 改 `CommitGenerationRequest`：字段换为 `structuredDiff/analysisModel/composerModel/confidenceThreshold`（保留 connectTimeout/readTimeout）
-- [ ] 4.2 重写 `CommitMessageGenerationService.generate`：analyze → score → compose（含一次重试） → validateOrFallback
-- [ ] 4.3 改 `GenerateCommitMessageAction`：调 `collectStructured`、构造新 Request、**用 validator 替换 `ensureUsableMessage`**、保留异常恢复与锁释放
-- [ ] 4.4 扩展 `settings/AiCommitSettingsConfigurable`：新增 Analysis Model / Composer Model / Confidence Threshold / Max Files / Max Hunks 字段
-- [ ] 4.5 更新 `CommitMessageGenerationServiceTest`（mock 四段编排顺序）+ 新增 `GenerateCommitMessageActionTest`
-- [ ] 4.6 跑 `./gradlew test` 通过后 commit：`refactor: orchestrate two stage commit generation`
+- [x] 4.1 改 `CommitGenerationRequest`：字段换为 `structuredDiff/analysisModel/composerModel/confidenceThreshold`（保留 connectTimeout/readTimeout）
+- [x] 4.2 重写 `CommitMessageGenerationService.generate`：analyze → score → compose（含一次重试） → validateOrFallback
+- [x] 4.3 改 `GenerateCommitMessageAction`：调 `collectStructured`、构造新 Request、**用 validator 替换 `ensureUsableMessage`**、保留异常恢复与锁释放
+- [x] 4.4 扩展 `settings/AiCommitSettingsConfigurable`：新增 Analysis Model / Composer Model / Confidence Threshold / Max Files / Max Hunks 字段
+- [x] 4.5 更新 `CommitMessageGenerationServiceTest`（mock 四段编排顺序 + 重试回退）；ActionTest 跳过（IntelliJ Action 依赖注入受限，改由批次 6 runIde 验证）
+- [x] 4.6 跑 `./gradlew test` 通过后 commit：`refactor: orchestrate two stage commit generation`
 
 ## 5. 批次 E：文档与回归矩阵
 
