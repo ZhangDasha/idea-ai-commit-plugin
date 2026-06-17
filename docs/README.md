@@ -28,16 +28,25 @@ idea-ai-commit-plugin/
     │   ├── kotlin/com/example/aicommit/
     │   │   ├── action/
     │   │   │   └── GenerateCommitMessageAction.kt   # 提交面板按钮入口
+    │   │   ├── model/
+    │   │   │   ├── StructuredDiff.kt                 # 结构化 diff + 变更状态模型
+    │   │   │   └── CommitIntent.kt                   # 意图/打分意图模型
     │   │   ├── service/
-    │   │   │   └── CommitMessageGenerationService.kt # 编排：Prompt → LLM → 结果
+    │   │   │   ├── CommitMessageGenerationService.kt # 两阶段编排：分析→打分→生成→校验
+    │   │   │   ├── CommitIntentAnalysisService.kt    # 第一阶段：意图归纳
+    │   │   │   ├── CommitRuleScorer.kt               # 本地规则打分与纠偏
+    │   │   │   ├── CommitMessageComposerService.kt   # 第二阶段：文案生成
+    │   │   │   └── CommitMessageValidator.kt         # 结果校验/重试/回退
     │   │   ├── git/
-    │   │   │   ├── GitDiffCollector.kt               # diff 收集与截断
+    │   │   │   ├── GitDiffCollector.kt               # diff 收集与结构化
+    │   │   │   ├── StructuredDiffBuilder.kt          # 结构化 diff 构建（预算/过滤）
     │   │   │   └── DiffLimits.kt                     # diff 大小限制参数
     │   │   ├── llm/
-    │   │   │   ├── DeepSeekClient.kt                 # 流式 SSE 客户端
+    │   │   │   ├── DeepSeekClient.kt                 # 流式 SSE 客户端（支持 system 角色）
+    │   │   │   ├── IntentAnalyzerClient.kt           # 第一阶段聚合客户端
     │   │   │   └── ChatChunk.kt                      # 响应 chunk 模型
     │   │   ├── prompt/
-    │   │   │   └── CommitPromptBuilder.kt            # Prompt 模板替换
+    │   │   │   └── CommitPromptBuilder.kt            # analysis/composer/单阶段模板
     │   │   ├── settings/
     │   │   │   ├── AiCommitSettingsState.kt          # 配置状态（持久化 XML）
     │   │   │   ├── AiCommitSettingsService.kt        # 配置读写 + PasswordSafe
@@ -59,6 +68,8 @@ idea-ai-commit-plugin/
 
 ## 4. 架构设计
 
+两阶段生成链路（意图归纳 → 本地规则纠偏 → 文案生成 → 校验/重试/回退）：
+
 ```
 用户点击 AI 按钮
        │
@@ -66,20 +77,27 @@ idea-ai-commit-plugin/
 GenerateCommitMessageAction (action 层)
   │  校验配置 → 校验勾选 → 状态锁
   │
-  ├─→ GitDiffCollector (git 层)
+  ├─→ GitDiffCollector.collectStructured (git 层)
   │     收集 includedChanges + unversionedFiles
-  │     生成 unified diff → 截断保护
+  │     → StructuredDiffBuilder：敏感过滤 + 文件/hunk 预算 → StructuredDiff
   │
-  ├─→ CommitMessageGenerationService (service 编排层)
+  ├─→ CommitMessageGenerationService (两阶段编排层)
   │     │
-  │     ├─→ CommitPromptBuilder (prompt 层)
-  │     │     替换 {language} / {diff} 占位符
+  │     ├─① CommitIntentAnalysisService → IntentAnalyzerClient → DeepSeekClient
+  │     │     结构化 diff → 第一阶段 JSON 意图（type/scope/intent/confidence）
   │     │
-  │     └─→ DeepSeekClient (llm 层)
-  │           SSE 流式请求 → 逐 chunk 回调
+  │     ├─② CommitRuleScorer（本地规则层，无网络）
+  │     │     docs/test 强制、scope 收敛、空洞 intent 降级、低置信度标记
+  │     │     → ScoredCommitIntent
+  │     │
+  │     ├─③ CommitMessageComposerService → DeepSeekClient
+  │     │     仅基于意图生成 Conventional Commits 文本（流式回填）
+  │     │
+  │     └─④ CommitMessageValidator
+  │           格式校验 → 失败重试一次 → 仍失败回退保守文案
   │
   └─→ 回填 CommitMessage 控件
-        流式写入 → 最终校验 → 异常恢复
+        第二阶段流式写入 → 最终合法文案覆盖 → 异常恢复原输入
 ```
 
 ### 4.1 职责边界
@@ -87,10 +105,14 @@ GenerateCommitMessageAction (action 层)
 | 模块 | 职责 | 不负责 |
 |------|------|--------|
 | Action | 读取 IDEA 上下文、状态切换、触发 Service | 不做业务逻辑 |
-| GitDiffCollector | diff 收集、截断、二进制跳过 | 不关心 UI 和网络 |
-| CommitPromptBuilder | 模板变量替换 | 不关心 diff 来源 |
-| DeepSeekClient | SSE 请求与解析 | 不关心 IDEA 组件 |
-| CommitMessageGenerationService | 编排上述三者 | 不直接操作 UI |
+| GitDiffCollector / StructuredDiffBuilder | diff 收集、结构化、敏感过滤、预算裁剪 | 不关心 UI 和网络 |
+| CommitIntentAnalysisService | 第一阶段意图归纳与 JSON 解析 | 不做规则打分与最终文案 |
+| CommitRuleScorer | type/scope 纠偏、低置信度标记 | 不做网络调用 |
+| CommitMessageComposerService | 第二阶段文案生成 | 不做规则纠偏 |
+| CommitMessageValidator | 格式校验、重试控制、回退 | 不直接操作 UI |
+| CommitPromptBuilder | analysis/composer/单阶段模板组装 | 不关心 diff 来源 |
+| DeepSeekClient / IntentAnalyzerClient | SSE 请求与解析 | 不关心 IDEA 组件 |
+| CommitMessageGenerationService | 编排上述四段 | 不直接操作 UI |
 | Settings | 配置持久化 + API Key 安全存储 | 不关心业务流程 |
 
 ## 5. 核心流程
@@ -117,13 +139,15 @@ GenerateCommitMessageAction (action 层)
 | 勾选变更 | `VcsDataKeys.COMMIT_WORKFLOW_UI` → `getIncludedChanges()` | `List<Change>` |
 | 未跟踪文件 | `VcsDataKeys.COMMIT_WORKFLOW_UI` → `getIncludedUnversionedFiles()` | `List<FilePath>` |
 
-### 5.3 diff 收集
+### 5.3 结构化 diff 收集
 
-- 已跟踪文件：通过 `Change.beforeRevision / afterRevision` 获取内容，生成简易 unified diff
-- 未跟踪文件：直接读取文件内容，前缀 `+`
-- 保护机制：
+- 已跟踪文件：逐文件 `git diff HEAD --unified` 取 patch，按 before/after 推断 added/deleted/modified
+- 未跟踪文件：读取内容构造新增 patch（相对路径，前缀 `+`）
+- 结构化：`StructuredDiffBuilder` 产出文件摘要（路径/状态/增删行/扩展名/语言/模块）+ 关键 hunk
+- 预算与过滤：
+  - 敏感文件默认过滤（`.env`、`.pem`、`.key`、`credentials`）
   - 二进制文件跳过（`.png`, `.jpg`, `.jar`, `.class` 等）
-  - diff 总长度超过 `maxChars`（默认 60000）截断
+  - `maxFiles`（默认 12）裁剪文件数，`maxHunksPerFile`（默认 3）裁剪每文件 hunk
   - 单文件超过 `maxUnversionedBytes`（默认 20000）跳过
 
 ### 5.4 LLM 调用
@@ -139,10 +163,10 @@ originalMessage = commitMessage.text    // 保存原内容
 commitMessage.setCommitMessage("Generating...")
 
 try {
-    // 流式回填
+    // 第二阶段流式回填（第一阶段静默）
     onChunk → invokeLater { setCommitMessage(buffer) }
-    // 最终写入
-    ensureUsableMessage(final) → setCommitMessage
+    // 最终写入：generate 内部已完成校验/重试/回退
+    setCommitMessage(finalMessage)
 } catch {
     invokeLater { setCommitMessage(originalMessage) }  // 恢复
     error notification

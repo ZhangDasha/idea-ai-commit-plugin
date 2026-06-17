@@ -43,13 +43,15 @@
 
 ## 5. 批次 E：文档与回归矩阵
 
-- [ ] 5.1 `CommitMessageValidatorTest` 补 Markdown 拦截用例，收紧正则为合法 type 枚举集
-- [ ] 5.2 `CommitRuleScorerTest` 补 docs/test/fix/refactor 全场景回归
-- [ ] 5.3 更新 `docs/README.md`：两阶段架构图（GitDiffCollector → Analysis → Scorer → Composer → Validator → 回填）
-- [ ] 5.4 跑全量 `./gradlew test` 确认 BUILD SUCCESSFUL
-- [ ] 5.5 commit：`docs: update two stage commit generation flow`
+- [x] 5.1 `CommitMessageValidatorTest` 补 Markdown 拦截用例，收紧正则为合法 type 枚举集（批次 C 已提前实现）
+- [x] 5.2 `CommitRuleScorerTest` 补 docs/test/fix/refactor 全场景回归（批次 C 已加 testsOnly 用例）
+- [x] 5.3 更新 `docs/README.md`：两阶段架构图（GitDiffCollector → Analysis → Scorer → Composer → Validator → 回填）
+- [x] 5.4 跑全量 `./gradlew test` 确认 BUILD SUCCESSFUL（34 个用例全绿）
+- [x] 5.5 commit：`docs: update two stage commit generation flow`
 
 ## 6. 手工验证（runIde）
 
 - [ ] 6.1 `./gradlew runIde`，提交面板触发 AI 生成，确认走新链路、设置页可见新字段
 - [ ] 6.2 大 diff / 重构场景验证 type、scope、回退行为符合验收标准
+
+> 注：6.x 需 GUI 交互，留给用户在本地 IDE 实例执行；自动化测试已覆盖编排/规则/校验/回退逻辑。
