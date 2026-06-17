@@ -29,6 +29,7 @@ open class DeepSeekClient(
         apiKey: String,
         model: String,
         prompt: String,
+        systemPrompt: String? = null,
         connectTimeout: Int = 10_000,
         readTimeout: Int = 60_000,
         onChunk: (String) -> Unit
@@ -44,7 +45,11 @@ open class DeepSeekClient(
         val body = mapOf(
             "model" to model,
             "stream" to true,
-            "messages" to listOf(mapOf("role" to "user", "content" to prompt))
+            "messages" to buildList {
+                // system 角色存在时置于首位，与 user 角色分离
+                if (!systemPrompt.isNullOrBlank()) add(mapOf("role" to "system", "content" to systemPrompt))
+                add(mapOf("role" to "user", "content" to prompt))
+            }
         )
 
         connection.outputStream.use { it.write(objectMapper.writeValueAsBytes(body)) }

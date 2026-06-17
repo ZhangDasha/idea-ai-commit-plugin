@@ -13,7 +13,7 @@ class CommitMessageGenerationServiceTest {
         val client = object : DeepSeekClient() {
             override fun streamChat(
                 baseUrl: String, apiKey: String, model: String, prompt: String,
-                connectTimeout: Int, readTimeout: Int, onChunk: (String) -> Unit
+                systemPrompt: String?, connectTimeout: Int, readTimeout: Int, onChunk: (String) -> Unit
             ) {
                 onChunk("feat:")
                 onChunk(" add ")

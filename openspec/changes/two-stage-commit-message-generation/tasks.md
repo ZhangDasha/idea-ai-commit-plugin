@@ -15,13 +15,13 @@
 
 ## 2. 批次 B：第一阶段意图归纳
 
-- [ ] 2.1 改 `llm/DeepSeekClient.streamChat`：在 `prompt` 后加 `systemPrompt: String? = null`，非空时插入 system 消息
-- [ ] 2.2 **同步修正**现有 `CommitMessageGenerationServiceTest` 匿名 `override fun streamChat` 签名（补 systemPrompt 参数），保证编译通过
-- [ ] 2.3 `prompt/CommitPromptBuilder.kt` 拆分 `buildAnalysisPrompt` / `buildComposerPrompt` 与对应 system 常量、模板
-- [ ] 2.4 新增 `llm/IntentAnalyzerClient.kt`：封装第一阶段调用，返回聚合 JSON
-- [ ] 2.5 新增 `service/CommitIntentAnalysisService.kt`：组装 prompt → 调 client → `readValue` 为 `CommitIntent` → 缺字段抛错
-- [ ] 2.6 新增测试 `service/CommitIntentAnalysisServiceTest`（合法 JSON 解析 + 缺字段失败）
-- [ ] 2.7 跑 `./gradlew test` 通过后 commit：`feat: add commit intent analysis stage`
+- [x] 2.1 改 `llm/DeepSeekClient.streamChat`：在 `prompt` 后加 `systemPrompt: String? = null`，非空时插入 system 消息
+- [x] 2.2 **同步修正**现有 `CommitMessageGenerationServiceTest` 匿名 `override fun streamChat` 签名（补 systemPrompt 参数），保证编译通过
+- [x] 2.3 `prompt/CommitPromptBuilder.kt` 拆分 `buildAnalysisPrompt` / `buildComposerPrompt` 与对应 system 常量、模板
+- [x] 2.4 新增 `llm/IntentAnalyzerClient.kt`：封装第一阶段调用，返回聚合 JSON
+- [x] 2.5 新增 `service/CommitIntentAnalysisService.kt`：组装 prompt → 调 client → `readValue` 为 `CommitIntent` → 缺字段抛错
+- [x] 2.6 新增测试 `service/CommitIntentAnalysisServiceTest`（合法 JSON 解析 + 缺字段失败）
+- [x] 2.7 跑 `./gradlew test` 通过后 commit：`feat: add commit intent analysis stage`
 
 ## 3. 批次 C：本地规则 + 第二阶段 + 校验
 
