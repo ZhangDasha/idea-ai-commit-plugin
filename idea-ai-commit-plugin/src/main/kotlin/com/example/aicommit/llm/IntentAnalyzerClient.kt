@@ -17,6 +17,8 @@ open class IntentAnalyzerClient(
         model: String,
         systemPrompt: String,
         userPrompt: String,
+        connectTimeout: Int = 10_000,
+        readTimeout: Int = 60_000,
         onChunk: (String) -> Unit
     ): String {
         val buffer = StringBuilder()
@@ -26,6 +28,8 @@ open class IntentAnalyzerClient(
             model = model,
             prompt = userPrompt,
             systemPrompt = systemPrompt,
+            connectTimeout = connectTimeout,
+            readTimeout = readTimeout,
             onChunk = { chunk ->
                 buffer.append(chunk)
                 onChunk(chunk)

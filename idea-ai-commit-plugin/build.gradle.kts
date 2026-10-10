@@ -24,6 +24,14 @@ dependencies {
     testImplementation(kotlin("test"))
 }
 
+intellijPlatform {
+    pluginConfiguration {
+        ideaVersion {
+            untilBuild = "262.*"
+        }
+    }
+}
+
 tasks.test {
     useJUnitPlatform()
 }

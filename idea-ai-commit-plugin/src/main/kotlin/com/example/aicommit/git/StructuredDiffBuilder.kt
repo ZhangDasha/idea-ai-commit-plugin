@@ -1,112 +1,128 @@
 package com.example.aicommit.git
 
-import com.example.aicommit.model.ChangeStatus
-import com.example.aicommit.model.ChangedFileSummary
-import com.example.aicommit.model.FileHunk
-import com.example.aicommit.model.StructuredDiff
+import com.example.aicommit.model.*
+import com.fasterxml.jackson.databind.ObjectMapper
 
-/**
- * 单文件 patch 输入。
- * additions/deletions 默认从 patch 行统计（+/- 开头且非 hunk 头 +++/---）。
- */
 internal data class PatchInput(
     val relativePath: String,
     val status: ChangeStatus,
     val patch: String,
-    val additions: Int = patch.lineSequence().count { it.startsWith("+") && !it.startsWith("+++") },
-    val deletions: Int = patch.lineSequence().count { it.startsWith("-") && !it.startsWith("---") }
+    val additions: Int = patchCounts(patch).first,
+    val deletions: Int = patchCounts(patch).second,
+    val oldPath: String? = null,
+    val repositoryRoot: String? = null,
+    val skipReason: String? = null
 )
 
-/**
- * 结构化 diff 构建器：敏感过滤 + 文件/hunk 预算裁剪 + 模块/语言推断。
- * 不负责 LLM 调用与 UI 写回。
- */
+/** Count only hunk bodies; +++/--- may be actual added/deleted source lines. */
+private fun patchCounts(patch: String): Pair<Int, Int> {
+    var inHunk = false
+    var additions = 0
+    var deletions = 0
+    patch.lineSequence().forEach { line ->
+        when {
+            line.startsWith("@@ ") -> inHunk = true
+            line.startsWith("diff --git ") -> inHunk = false
+            inHunk && line.startsWith('+') -> additions++
+            inHunk && line.startsWith('-') -> deletions++
+        }
+    }
+    return additions to deletions
+}
+
+internal fun isSensitivePath(path: String): Boolean = path.split('/', '\\').any { segment ->
+    val name = segment.lowercase()
+    name == ".env" || name.startsWith(".env.") || name.endsWith(".pem") || name.endsWith(".key") ||
+        name.contains("credentials") || name == "id_rsa" || name == "id_ed25519"
+}
+
+/** Whole hunks share one budget including the JSON inventory and exclusion metadata. */
 class StructuredDiffBuilder(private val limits: DiffLimits = DiffLimits()) {
+    private val mapper = ObjectMapper()
 
-    /** 默认过滤的敏感文件名片段 */
-    private val sensitivePatterns = listOf(".env", ".pem", ".key", "credentials")
-
-    /**
-     * 从 patch 输入列表构建结构化 diff。
-     * @param maxFiles 文件数量预算（超出则裁剪并标记 truncated）
-     * @param maxHunksPerFile 每文件 hunk 数量预算
-     */
     internal fun buildFromPatch(inputs: List<PatchInput>, maxFiles: Int, maxHunksPerFile: Int): StructuredDiff {
-        // 先过滤敏感文件，truncated 仅反映是否因 maxFiles 裁剪（不反映敏感过滤）
-        val safe = inputs.filterNot { isSensitive(it.relativePath) }
-        val truncated = safe.size > maxFiles
-        val filtered = safe.take(maxFiles)
-
-        val files = filtered.map { input ->
-            ChangedFileSummary(
-                relativePath = input.relativePath,
-                status = input.status,
-                additions = input.additions,
-                deletions = input.deletions,
-                extension = input.relativePath.substringAfterLast('.', ""),
-                language = detectLanguage(input.relativePath),
-                module = detectModule(input.relativePath)
-            )
+        require(inputs.isNotEmpty()) { "No selected Git changes" }
+        require(maxFiles >= 0 && maxHunksPerFile >= 0)
+        val omissions = linkedMapOf<String, DiffOmission>()
+        fun omit(reason: String, files: Int = 0, hunks: Int = 0) {
+            val previous = omissions[reason] ?: DiffOmission(reason)
+            omissions[reason] = previous.copy(files = previous.files + files, hunks = previous.hunks + hunks)
         }
-
-        // 每文件提取有限 hunk，按 maxChars 截断
-        val hunks = filtered.flatMap { input ->
-            extractHunks(input.patch)
-                .take(maxHunksPerFile)
-                .map { hunkText ->
-                    FileHunk(
-                        relativePath = input.relativePath,
-                        header = hunkText.lineSequence().firstOrNull().orEmpty(),
-                        patch = hunkText.take(limits.maxChars)
-                    )
+        val safe = inputs.filter { input ->
+            val reason = if (isSensitivePath(input.relativePath) || input.oldPath?.let(::isSensitivePath) == true)
+                "sensitive" else input.skipReason
+            if (reason != null) omit(reason, files = 1)
+            reason == null
+        }
+        val allHunks = safe.map { extractHunks(it.patch) }
+        val files = safe.map { input ->
+            ChangedFileSummary(input.relativePath, input.status, input.additions, input.deletions,
+                input.relativePath.substringAfterLast('.', ""), detectLanguage(input.relativePath),
+                detectModule(input.relativePath), input.oldPath, input.repositoryRoot)
+        }.toMutableList()
+        val candidates = mutableListOf<FileHunk>()
+        var filesWithHunks = 0
+        safe.zip(allHunks).forEach { (input, hunks) ->
+            if (hunks.isNotEmpty() && filesWithHunks++ >= maxFiles) {
+                omit("maxFiles", hunks = hunks.size)
+            } else {
+                if (hunks.size > maxHunksPerFile) omit("maxHunksPerFile", hunks = hunks.size - maxHunksPerFile)
+                hunks.take(maxHunksPerFile).forEach { patch ->
+                    candidates.add(FileHunk(input.relativePath, patch.substringBefore('\n'), patch, input.repositoryRoot))
                 }
+            }
         }
-
-        return StructuredDiff(
-            files = files,
-            keyHunks = hunks,
-            truncated = truncated,
-            totalFiles = files.size,
-            totalAdditions = files.sumOf { it.additions },
-            totalDeletions = files.sumOf { it.deletions }
-        )
+        val selected = mutableListOf<FileHunk>()
+        omit("maxChars", hunks = candidates.size)
+        fun result(): StructuredDiff {
+            val recorded = omissions.values.filter { it.files > 0 || it.hunks > 0 }
+            return StructuredDiff(files.toList(), selected.toList(), recorded.isNotEmpty(), inputs.size,
+                safe.sumOf { it.additions }, safe.sumOf { it.deletions }, allHunks.sumOf { it.size }, recorded)
+        }
+        fun fits() = mapper.writeValueAsString(result()).length <= limits.maxChars
+        // Keep all safe summaries ahead of any hunk; only remove summaries if metadata itself overflows.
+        while (!fits() && files.isNotEmpty()) {
+            files.removeAt(files.lastIndex)
+            omit("maxChars", files = 1)
+        }
+        require(fits()) { "maxChars is too small for structured diff totals and omission metadata" }
+        val retained = files.map { it.repositoryRoot to it.relativePath }.toSet()
+        for (hunk in candidates) {
+            if (hunk.repositoryRoot to hunk.relativePath !in retained) continue
+            selected.add(hunk)
+            omit("maxChars", hunks = -1)
+            if (!fits()) {
+                selected.removeAt(selected.lastIndex)
+                omit("maxChars", hunks = 1)
+            }
+        }
+        return result()
     }
 
-    /** 敏感文件判定：路径包含任一敏感片段即过滤 */
-    private fun isSensitive(path: String): Boolean =
-        sensitivePatterns.any { path.contains(it, ignoreCase = true) }
+    /** Only an obvious directory above src supplies a module; package namespaces do not. */
+    private fun detectModule(path: String): String? {
+        val parts = path.split('/')
+        val src = parts.indexOf("src")
+        return if (src > 0) parts[src - 1].takeUnless { it in setOf("main", "test", "java", "kotlin") } else null
+    }
 
-    /** 模块推断：优先取 aicommit 下一级目录，其次 src 后两级目录 */
-    private fun detectModule(path: String): String? =
-        path.split('/').windowed(2, 1).firstOrNull { it.first() == "aicommit" }?.getOrNull(1)
-            ?: path.split('/').dropWhile { it != "src" }.drop(2).firstOrNull()
-
-    /** 语言推断：按扩展名映射 */
-    private fun detectLanguage(path: String): String = when {
-        path.endsWith(".kt") -> "Kotlin"
-        path.endsWith(".java") -> "Java"
-        path.endsWith(".md") -> "Markdown"
-        path.endsWith(".xml") -> "XML"
+    private fun detectLanguage(path: String): String = when (path.substringAfterLast('.').lowercase()) {
+        "kt", "kts" -> "Kotlin"
+        "java" -> "Java"
+        "md" -> "Markdown"
+        "xml" -> "XML"
+        "js", "jsx" -> "JavaScript"
+        "ts", "tsx" -> "TypeScript"
+        "py" -> "Python"
         else -> "PlainText"
     }
 
-    /** 按 @@ 头切分 patch 为独立 hunk 文本（每段以 @@ 行起始） */
     private fun extractHunks(patch: String): List<String> {
-        val hunks = mutableListOf<String>()
-        val current = StringBuilder()
-        var inHunk = false
-        patch.lineSequence().forEach { line ->
-            if (line.startsWith("@@")) {
-                // 遇到新 hunk 头，收尾上一个
-                if (inHunk && current.isNotEmpty()) hunks.add(current.toString())
-                current.setLength(0)
-                current.append(line).append('\n')
-                inHunk = true
-            } else if (inHunk) {
-                current.append(line).append('\n')
-            }
+        val starts = Regex("(?m)^@@ .*@@[^\\n]*(?:\\n|$)").findAll(patch).map { it.range.first }.toList()
+        return starts.mapIndexed { index, start ->
+            val end = starts.getOrNull(index + 1) ?: patch.length
+            val nextFile = patch.indexOf("\ndiff --git ", start)
+            patch.substring(start, if (nextFile in start until end) nextFile + 1 else end)
         }
-        if (inHunk && current.isNotEmpty()) hunks.add(current.toString())
-        return hunks
     }
 }
