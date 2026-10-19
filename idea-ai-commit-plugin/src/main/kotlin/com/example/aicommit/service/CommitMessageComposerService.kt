@@ -35,7 +35,7 @@ class CommitMessageComposerService(
             apiKey = apiKey,
             model = model,
             prompt = prompt,
-            systemPrompt = CommitPromptBuilder.COMPOSER_SYSTEM_PROMPT,
+            systemPrompt = promptBuilder.buildComposerSystemPrompt(language),
             connectTimeout = connectTimeout,
             readTimeout = readTimeout
         ) { chunk ->

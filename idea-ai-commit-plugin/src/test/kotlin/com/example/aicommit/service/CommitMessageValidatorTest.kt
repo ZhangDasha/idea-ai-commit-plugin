@@ -59,9 +59,7 @@ class CommitMessageValidatorTest {
         val intent = ScoredCommitIntent("fix", null, "修复会话过期。", "", "", .2)
         assertEquals("fix: 修复会话过期", validator.buildFallback(intent))
         val longIntent = intent.copy(normalizedIntent = "修".repeat(100))
-        val fallback = validator.buildFallback(longIntent)
-        assertEquals(72, fallback.length)
-        assertEquals(fallback, validator.validateOrFallback(fallback, longIntent))
+        assertFailsWith<IllegalArgumentException> { validator.buildFallback(longIntent) }
     }
 
     @Test
@@ -129,6 +127,45 @@ class CommitMessageValidatorTest {
         for (body in listOf("# Explanation", "- item", "1. item", "feat: unrelated change")) {
             assertFailsWith<IllegalArgumentException> { validator.validateOrFallback("fix: repair expiry\n\n$body", intent) }
         }
+    }
+
+    @Test
+    fun `Chinese and English are enforced on prose instead of scope or source literals`() {
+        val intent = ScoredCommitIntent("feat", "ReadSitemapService", "移除 markdown 参数", "拒绝仅含 Markdown 的响应", "", .9)
+        val chinese = "feat(ReadSitemapService): 移除 markdown 参数"
+        assertEquals(chinese, validator.validateOrFallback(chinese, intent, "Chinese"))
+        assertFailsWith<IllegalArgumentException> {
+            validator.validateOrFallback("feat(ReadSitemapService): remove markdown parameter", intent, "Chinese")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            validator.validateOrFallback("$chinese\n\nReject markdown-only responses", intent, "Chinese")
+        }
+        assertFailsWith<IllegalArgumentException> { validator.validateOrFallback(chinese, intent, "English") }
+        val english = "feat(ReadSitemapService): reject the literal \"中文\""
+        assertEquals(english, validator.validateOrFallback(english, intent, "English"))
+        val chineseScope = intent.copy(finalScope = "站点")
+        assertFailsWith<IllegalArgumentException> {
+            validator.validateOrFallback("feat(站点): remove markdown parameter", chineseScope, "Chinese")
+        }
+    }
+
+    @Test
+    fun `fallback respects requested language including breaking description`() {
+        val chinese = ScoredCommitIntent("fix", null, "修复站点解析", "", "", .9)
+        assertEquals("fix: 修复站点解析", validator.buildFallback(chinese, "Chinese"))
+        assertFailsWith<IllegalArgumentException> {
+            validator.buildFallback(chinese.copy(normalizedIntent = "repair sitemap parsing"), "Chinese")
+        }
+        assertFailsWith<IllegalArgumentException> {
+            validator.buildFallback(chinese.copy(isBreaking = true, breakingChange = "Use the new endpoint"), "Chinese")
+        }
+    }
+
+    @Test
+    fun `English fallback does not truncate a technical word`() {
+        val intent = ScoredCommitIntent("feat", "ReadSitemapService",
+            "remove markdown parameter and reject markdown-only responses", "", "", .9)
+        assertFailsWith<IllegalArgumentException> { validator.buildFallback(intent, "English") }
     }
 
     @Test

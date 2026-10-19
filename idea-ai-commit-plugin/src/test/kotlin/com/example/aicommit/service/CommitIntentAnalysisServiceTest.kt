@@ -26,7 +26,7 @@ class CommitIntentAnalysisServiceTest {
         assertEquals("stabilize generation flow", result.intent)
         assertEquals(0.82, result.confidence)
         verify {
-            client.analyze("u", "k", "m", any(), match { it.startsWith("Chinese|") }, 123, 456, any())
+            client.analyze("u", "k", "m", match { it.contains("输出语言必须为简体中文") }, match { it.startsWith("Chinese|") }, 123, 456, any())
         }
     }
 

@@ -28,10 +28,12 @@ open class DeepSeekClient(
         val payload = line.removePrefix("data:").trim()
         if (payload == "[DONE]") return null
         val json = objectMapper.readTree(payload)
-        require(!json.has("error")) { "模型流式响应包含错误" }
-        // Whitespace-only deltas are real tokens (spaces between words and body newlines).
-        return json.path("choices").path(0).path("delta").path("content")
-            .takeIf { it.isTextual }?.textValue()?.takeIf { it.isNotEmpty() }
+        require(!json.hasNonNull("error")) { "模型流式响应包含错误" }
+        val choice = json.path("choices").path(0)
+        require(choice.path("finish_reason").asText() != "length") { "模型输出被 token 上限截断，请精简输入或调整输出预算" }
+        val content = choice.path("delta").path("content")
+        // Reasoning/control frames often carry JSON null; whitespace text is a real streamed token.
+        return if (content.isTextual) content.textValue().ifEmpty { null } else null
     }
 
     open fun streamChat(
@@ -45,10 +47,16 @@ open class DeepSeekClient(
         onChunk: (String) -> Unit
     ) {
         require(connectTimeout > 0 && readTimeout > 0) { "请求超时必须大于 0" }
-        val uri = URI.create(baseUrl)
-        require(uri.scheme in setOf("http", "https") && !uri.host.isNullOrBlank()) { "Base URL 必须为 HTTP(S) 地址" }
+        val baseUri = URI.create(baseUrl)
+        require(baseUri.scheme in setOf("http", "https") && !baseUri.host.isNullOrBlank() &&
+            baseUri.userInfo == null && baseUri.fragment == null) { "Base URL 必须为 HTTP(S) 地址" }
+        // Support the base URL convention used by OpenAI SDKs as well as a complete endpoint.
+        val basePath = baseUri.rawPath.orEmpty().trimEnd('/')
+        val completionPath = if (basePath.endsWith("/chat/completions")) basePath else "$basePath/chat/completions"
+        val query = baseUri.rawQuery?.let { "?$it" }.orEmpty()
+        val uri = URI.create("${baseUri.scheme}://${baseUri.rawAuthority}$completionPath$query")
         checkCanceled()
-        val body = mapOf(
+        val body = mutableMapOf<String, Any>(
             "model" to model,
             "stream" to true,
             "temperature" to 0.2,
@@ -58,6 +66,10 @@ open class DeepSeekClient(
                 add(mapOf("role" to "user", "content" to prompt))
             }
         )
+        if (uri.host.equals("api.deepseek.com", ignoreCase = true)) {
+            // Structured commit summaries do not need a reasoning stream that consumes the output budget.
+            body["thinking"] = mapOf("type" to "disabled")
+        }
         val client = HttpClient.newBuilder().connectTimeout(Duration.ofMillis(connectTimeout.toLong()))
             .followRedirects(HttpClient.Redirect.NEVER).build()
         val request = HttpRequest.newBuilder(uri)
@@ -73,7 +85,10 @@ open class DeepSeekClient(
             headers.body().subscribe(subscriber)
             if (headers.statusCode() !in 200..299) {
                 // Providers may echo source or credentials in error bodies; keep UI errors bounded.
-                throw IllegalStateException("模型请求失败，HTTP ${headers.statusCode()}")
+                val status = headers.statusCode()
+                val hint = if (status in setOf(400, 404))
+                    "。请核对接口地址及模型 ID（$model）；模型展示名称可能与 API ID 不同" else ""
+                throw IllegalStateException("模型请求失败，HTTP $status$hint")
             }
             val pendingLine = ByteArrayOutputStream()
             var lastRead = System.nanoTime()

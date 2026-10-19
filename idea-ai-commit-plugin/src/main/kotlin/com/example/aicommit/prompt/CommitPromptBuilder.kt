@@ -1,7 +1,15 @@
 package com.example.aicommit.prompt
 
+import com.example.aicommit.service.CommitLanguage
+
 /** Builds the legacy prompt and the two-stage analysis/composition prompts. */
 class CommitPromptBuilder {
+    fun buildAnalysisSystemPrompt(language: String): String =
+        "$ANALYSIS_SYSTEM_PROMPT\n${CommitLanguage.instruction(language)}"
+
+    fun buildComposerSystemPrompt(language: String): String =
+        "$COMPOSER_SYSTEM_PROMPT\n${CommitLanguage.instruction(language)}"
+
     /** Legacy assembly retained for existing callers. */
     fun build(template: String, language: String, diff: String): String {
         require(template.contains("{diff}")) { "Prompt must contain {diff}" }

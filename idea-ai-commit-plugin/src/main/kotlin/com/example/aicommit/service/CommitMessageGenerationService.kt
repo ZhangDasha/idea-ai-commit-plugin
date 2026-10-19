@@ -64,7 +64,7 @@ class CommitMessageGenerationService(
         scoredIntent: ScoredCommitIntent
     ): String {
         return try {
-            validateGenerated(message, scoredIntent)
+            validateGenerated(message, scoredIntent, request.language)
         } catch (first: IllegalArgumentException) {
             checkCanceled()
             val feedback = buildFeedback(first.message.orEmpty(), message)
@@ -80,15 +80,15 @@ class CommitMessageGenerationService(
                 validationFeedback = feedback
             ) { }
             try {
-                validateGenerated(retried, scoredIntent)
+                validateGenerated(retried, scoredIntent, request.language)
             } catch (_: IllegalArgumentException) {
-                validator.buildFallback(scoredIntent)
+                validator.buildFallback(scoredIntent, request.language)
             }
         }
     }
 
-    private fun validateGenerated(message: String, intent: ScoredCommitIntent): String =
-        validator.validateOrFallback(message, intent)
+    private fun validateGenerated(message: String, intent: ScoredCommitIntent, language: String): String =
+        validator.validateOrFallback(message, intent, language)
 
     private fun buildFeedback(error: String, raw: String): String = buildString {
         append("Validation error: ").append(error.take(MAX_FEEDBACK_CHARS))

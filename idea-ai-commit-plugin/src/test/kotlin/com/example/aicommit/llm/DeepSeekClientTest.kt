@@ -27,9 +27,9 @@ class DeepSeekClientTest {
         val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
         val executor = Executors.newCachedThreadPool { Thread(it, "test-http").apply { isDaemon = true } }
         server.executor = executor
-        server.createContext("/chat", handler)
+        server.createContext("/", handler)
         server.start()
-        try { test("http://127.0.0.1:${server.address.port}/chat") }
+        try { test("http://127.0.0.1:${server.address.port}/chat/completions") }
         finally { server.stop(0); executor.shutdownNow() }
     }
 
@@ -38,7 +38,10 @@ class DeepSeekClientTest {
         var request = ""
         withServer({ exchange ->
             request = exchange.requestBody.bufferedReader().use { it.readText() }
-            val sse = "data: {\"choices\":[{\"delta\":{\"content\":\"fix: 修复取消\"}}]}\n\n" +
+            val sse = "data: {\"choices\":[{\"delta\":{\"content\":null,\"reasoning_content\":\"reasoning\"}}]}\n\n" +
+                "data: {\"choices\":[{\"delta\":{\"content\":\"fix:\"}}]}\n\n" +
+                "data: {\"choices\":[{\"delta\":{\"content\":\" \"}}]}\n\n" +
+                "data: {\"choices\":[{\"delta\":{\"content\":\"修复取消\"}}]}\n\n" +
                 "data: [DONE]\n\ndata: not-json-after-done\n"
             val bytes = sse.toByteArray(Charsets.UTF_8)
             exchange.sendResponseHeaders(200, bytes.size.toLong())
@@ -50,12 +53,22 @@ class DeepSeekClientTest {
                 assertEquals(caller, Thread.currentThread())
                 chunks.add(it)
             }
-            assertEquals(listOf("fix: 修复取消"), chunks)
+            assertEquals(listOf("fix:", " ", "修复取消"), chunks)
             val json = mapper.readTree(request)
             assertEquals("model", json["model"].asText())
             assertEquals(0.2, json["temperature"].asDouble())
             assertEquals("system", json["messages"][0]["content"].asText())
             assertEquals("prompt", json["messages"][1]["content"].asText())
+        }
+    }
+
+    @Test fun `SSE preserves text whitespace and ignores null control frames`() {
+        val client = DeepSeekClient(checkCanceled = {})
+        kotlin.test.assertNull(client.parseSseLine("data: {\"choices\":[{\"delta\":{\"content\":null}}]}"))
+        kotlin.test.assertNull(client.parseSseLine("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"thought\"}}]}"))
+        assertEquals("\n\n", client.parseSseLine("data: {\"choices\":[{\"delta\":{\"content\":\"\\n\\n\"}}]}"))
+        assertFailsWith<IllegalArgumentException> {
+            client.parseSseLine("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}")
         }
     }
 
@@ -129,6 +142,41 @@ class DeepSeekClientTest {
             }
             assertTrue(error.message.orEmpty().contains("401"))
             assertFalse(error.message.orEmpty().contains("secret"))
+        }
+    }
+
+    @Test fun `root versioned base and complete endpoint use the correct request path`() {
+        val paths = mutableListOf<String>()
+        withServer({ exchange ->
+            paths.add(exchange.requestURI.toString())
+            exchange.requestBody.close()
+            val bytes = "data: [DONE]\n\n".toByteArray()
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }) { full ->
+            val root = full.removeSuffix("/chat/completions")
+            val client = DeepSeekClient(checkCanceled = {})
+            for (url in listOf(root, "$root/", "$root/v1", "$root/v1/", full, "$full/", "$root/v1/chat/completions?api-version=test")) {
+                client.streamChat(url, "key", "model", "prompt", readTimeout = 1000) {}
+            }
+            assertEquals(listOf("/chat/completions", "/chat/completions", "/v1/chat/completions", "/v1/chat/completions",
+                "/chat/completions", "/chat/completions", "/v1/chat/completions?api-version=test"), paths)
+        }
+    }
+
+    @Test fun `invalid endpoint or model gives an actionable error without exposing response`() {
+        withServer({ exchange ->
+            exchange.requestBody.close()
+            val bytes = "private-provider-response".toByteArray()
+            exchange.sendResponseHeaders(404, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }) { url ->
+            val error = assertFailsWith<IllegalStateException> {
+                DeepSeekClient(checkCanceled = {}).streamChat(url, "key", "display-model-name", "prompt", readTimeout = 1000) {}
+            }
+            assertTrue(error.message.orEmpty().contains("模型 ID"))
+            assertTrue(error.message.orEmpty().contains("display-model-name"))
+            assertFalse(error.message.orEmpty().contains("private-provider-response"))
         }
     }
 

@@ -34,7 +34,7 @@ class CommitIntentAnalysisService(
             baseUrl = baseUrl,
             apiKey = apiKey,
             model = model,
-            systemPrompt = CommitPromptBuilder.ANALYSIS_SYSTEM_PROMPT,
+            systemPrompt = promptBuilder.buildAnalysisSystemPrompt(language),
             userPrompt = userPrompt,
             connectTimeout = connectTimeout,
             readTimeout = readTimeout,

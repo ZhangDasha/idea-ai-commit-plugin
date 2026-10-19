@@ -1,5 +1,6 @@
 package com.example.aicommit.settings
 
+import com.example.aicommit.service.CommitLanguage
 import java.net.URI
 import com.intellij.credentialStore.CredentialAttributes
 import com.intellij.credentialStore.generateServiceName
@@ -30,7 +31,7 @@ class AiCommitSettingsService : PersistentStateComponent<AiCommitSettingsState> 
     override fun loadState(state: AiCommitSettingsState) {
         // Retain a user's old model choice when loading pre-two-stage settings.
         if (state.model.isNotBlank() && state.model != "deepseek-chat" &&
-            state.analysisModel == "deepseek-chat" && state.composerModel == "deepseek-chat") {
+            state.analysisModel == state.composerModel && state.analysisModel in setOf("deepseek-chat", "deepseek-flash")) {
             state.analysisModel = state.model
             state.composerModel = state.model
         }
@@ -61,6 +62,7 @@ class AiCommitSettingsService : PersistentStateComponent<AiCommitSettingsState> 
         if (state.analysisModel.isBlank()) return "Analysis Model 不能为空"
         if (state.composerModel.isBlank()) return "Composer Model 不能为空"
         if (state.language.isBlank()) return "Language 不能为空"
+        if (runCatching { CommitLanguage.isChinese(state.language) }.isFailure) return "仅支持 Chinese 或 English 输出语言"
         if (!state.confidenceThreshold.isFinite() || state.confidenceThreshold !in 0.0..1.0)
             return "Confidence Threshold 必须在 0 到 1 之间"
         if (state.maxFiles <= 0) return "Max Files 必须大于 0"

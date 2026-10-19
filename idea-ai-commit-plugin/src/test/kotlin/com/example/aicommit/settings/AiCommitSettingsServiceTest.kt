@@ -29,6 +29,7 @@ class AiCommitSettingsServiceTest {
         for (confidence in listOf(-0.1, 1.5, Double.NaN, Double.POSITIVE_INFINITY)) {
             assertEquals("Confidence Threshold 必须在 0 到 1 之间", service.validate(AiCommitSettingsState(confidenceThreshold = confidence), "key"))
         }
+        assertEquals("仅支持 Chinese 或 English 输出语言", service.validate(AiCommitSettingsState(language = "unknown"), "key"))
         assertEquals("Max Files 必须大于 0", service.validate(AiCommitSettingsState(maxFiles = 0), "key"))
         assertEquals("Max Hunks Per File 必须大于 0", service.validate(AiCommitSettingsState(maxHunksPerFile = 0), "key"))
         assertEquals("请求超时必须大于 0", service.validate(AiCommitSettingsState(readTimeoutMillis = 0), "key"))
@@ -41,7 +42,7 @@ class AiCommitSettingsServiceTest {
         assertEquals("custom-model", service.state.composerModel)
         service.loadState(AiCommitSettingsState(model = "old", analysisModel = "analysis"))
         assertEquals("analysis", service.state.analysisModel)
-        assertEquals("deepseek-chat", service.state.composerModel)
+        assertEquals("deepseek-flash", service.state.composerModel)
     }
 
     @Test fun `explicit default models are not replaced by the old model on reload`() {
@@ -54,6 +55,8 @@ class AiCommitSettingsServiceTest {
 
     @Test fun `defaults expose effective prompts and limits`() {
         val state = AiCommitSettingsState()
+        assertEquals("deepseek-flash", state.analysisModel)
+        assertEquals("deepseek-flash", state.composerModel)
         assertEquals(CommitPromptBuilder.ANALYSIS_TEMPLATE, state.analysisPromptTemplate)
         assertEquals(CommitPromptBuilder.COMPOSER_TEMPLATE, state.composerPromptTemplate)
         assertEquals(12, state.maxFiles)

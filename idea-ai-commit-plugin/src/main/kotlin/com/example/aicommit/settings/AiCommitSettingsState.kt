@@ -19,8 +19,8 @@ data class AiCommitSettingsState(
     // 两阶段生成相关配置，默认值安全可用，老配置自动兼容
     var analysisPromptTemplate: String = CommitPromptBuilder.ANALYSIS_TEMPLATE,
     var composerPromptTemplate: String = CommitPromptBuilder.COMPOSER_TEMPLATE,
-    var analysisModel: String = "deepseek-chat",
-    var composerModel: String = "deepseek-chat",
+    var analysisModel: String = "deepseek-flash",
+    var composerModel: String = "deepseek-flash",
     var confidenceThreshold: Double = 0.55,
     var maxFiles: Int = 12,
     var maxHunksPerFile: Int = 3

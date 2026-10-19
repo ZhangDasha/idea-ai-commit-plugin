@@ -271,14 +271,16 @@ class GitDiffCollector internal constructor(
         // Resolve a selected gitlink from its parent, including initialized submodules.
         // Files inside the submodule still resolve to the submodule's own repository.
         val selected = File(path).absoluteFile
-        if (selected.isDirectory && selected.parentFile?.isDirectory == true) {
+        // A directory symlink is a Git entry; resolve its parent rather than its target.
+        val selectedDirectory = Files.isDirectory(selected.toPath(), LinkOption.NOFOLLOW_LINKS)
+        if (selectedDirectory && selected.parentFile?.isDirectory == true) {
             val parentRoot = execute(listOf("git", "rev-parse", "--show-toplevel"), selected.parentFile)
             if (parentRoot.exitCode == 0) {
                 val owner = File(parentRoot.stdout.trim()).canonicalFile
                 if (isGitlink(owner, path)) return owner
             }
         }
-        var directory: File? = selected.let { if (it.isDirectory) it else it.parentFile }
+        var directory: File? = selected.let { if (selectedDirectory) it else it.parentFile }
         while (directory != null && !directory.isDirectory) directory = directory.parentFile
         val workDir = directory ?: throw GitCollectionException("Cannot resolve Git directory for $path")
         val output = execAndRead(listOf("git", "rev-parse", "--show-toplevel"), workDir).trim()

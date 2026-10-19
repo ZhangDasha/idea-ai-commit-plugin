@@ -124,6 +124,29 @@ class GitDiffCollectorTest {
     }
 
     @Test
+    fun `directory symlink outside Git is skipped without aborting other selected changes`() = repo { root ->
+        val tracked = File(root, ".gitignore").apply { writeText("old\n") }
+        commit(root)
+        tracked.writeText("new\n")
+        val outside = Files.createTempDirectory("external-node-package")
+        val link = root.toPath().resolve("node_modules/typebox")
+        Files.createDirectories(link.parent)
+        try {
+            Files.createSymbolicLink(link, outside)
+            val inputs = collector.collectPaths(listOf(GitPathChange(tracked.path, tracked.path)), listOf(link.toString()))
+            assertEquals("symbolicLink", inputs.single { it.relativePath == "node_modules/typebox" }.skipReason)
+            val diff = StructuredDiffBuilder().buildFromPatch(inputs, 12, 3)
+            assertEquals(2, diff.totalFiles)
+            assertEquals(".gitignore", diff.files.single().relativePath)
+            assertTrue(diff.keyHunks.single().patch.contains("+new"))
+            assertEquals("symbolicLink", diff.omissions.single().reason)
+        } finally {
+            Files.deleteIfExists(link)
+            Files.deleteIfExists(outside)
+        }
+    }
+
+    @Test
     fun `cancellation propagates unchanged and kills command and child`() {
         val pidFile = Files.createTempFile("cancel-diff", ".pid").toFile().apply { delete() }
         val canceled = ProcessCanceledException()

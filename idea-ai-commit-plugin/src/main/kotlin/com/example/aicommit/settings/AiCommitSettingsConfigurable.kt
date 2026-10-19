@@ -29,10 +29,16 @@ class AiCommitSettingsConfigurable : Configurable {
     override fun getDisplayName(): String = "AI Commit"
 
     override fun createComponent(): JComponent = panel {
-        row("Base URL") { cell(baseUrlField).align(AlignX.FILL) }
+        row("Base URL") {
+            cell(baseUrlField).align(AlignX.FILL).comment("支持服务根地址、/v1 或完整的 /chat/completions 地址")
+        }
         row("API Key") { cell(apiKeyField).align(AlignX.FILL).comment("留空保留已保存的密钥") }
-        row("Analysis Model") { cell(analysisModelField).align(AlignX.FILL) }
-        row("Composer Model") { cell(composerModelField).align(AlignX.FILL) }
+        row("Analysis Model") {
+            cell(analysisModelField).align(AlignX.FILL).comment("填写 API 模型 ID；DeepSeek Flash 为 deepseek-flash，展示名称可能不同")
+        }
+        row("Composer Model") {
+            cell(composerModelField).align(AlignX.FILL).comment("使用接口 /models 返回的模型 ID")
+        }
         row("Language") { cell(languageField) }
         row("Confidence Threshold (0–1)") { cell(confidenceField) }
         row("Max Files with Hunks") { cell(maxFilesField) }

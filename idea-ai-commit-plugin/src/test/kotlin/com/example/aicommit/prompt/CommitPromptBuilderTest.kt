@@ -40,6 +40,16 @@ class CommitPromptBuilderTest {
     }
 
     @Test
+    fun `selected language is mandatory even without a template language placeholder`() {
+        val builder = CommitPromptBuilder()
+        // A persisted old/custom template may contain only the input placeholder.
+        assertEquals("{}", builder.buildComposerPrompt("Chinese", "{}", "{intent}"))
+        assertTrue(builder.buildAnalysisSystemPrompt("Chinese").contains("输出语言必须为简体中文"))
+        assertTrue(builder.buildComposerSystemPrompt("Chinese").contains("输出语言必须为简体中文"))
+        assertTrue(builder.buildComposerSystemPrompt("English").contains("in English"))
+    }
+
+    @Test
     fun `staged builders reject empty input`() {
         assertFailsWith<IllegalArgumentException> {
             CommitPromptBuilder().buildAnalysisPrompt("Chinese", "")
