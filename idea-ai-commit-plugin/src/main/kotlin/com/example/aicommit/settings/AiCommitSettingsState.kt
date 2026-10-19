@@ -17,6 +17,8 @@ data class AiCommitSettingsState(
     var connectTimeoutMillis: Int = 10_000,
     var readTimeoutMillis: Int = 60_000,
     // 两阶段生成相关配置，默认值安全可用，老配置自动兼容
+    var analysisPromptTemplate: String = CommitPromptBuilder.ANALYSIS_TEMPLATE,
+    var composerPromptTemplate: String = CommitPromptBuilder.COMPOSER_TEMPLATE,
     var analysisModel: String = "deepseek-chat",
     var composerModel: String = "deepseek-chat",
     var confidenceThreshold: Double = 0.55,

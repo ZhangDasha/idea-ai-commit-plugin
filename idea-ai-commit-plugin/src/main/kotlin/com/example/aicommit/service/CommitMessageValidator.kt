@@ -1,32 +1,95 @@
 package com.example.aicommit.service
 
+import com.example.aicommit.model.CommitIntentRules
 import com.example.aicommit.model.ScoredCommitIntent
 
-/**
- * 结果校验器：写回提交框前做格式校验，非法则交给上层重试或回退。
- * 回退优先保证"正确、保守、可提交"，而非表达丰富。
- */
+/** Validates Conventional Commits before writeback; fallback uses only supplied intent. */
 class CommitMessageValidator {
+    private val headerPattern = Regex("^([a-z]+)(?:\\(([^()]+)\\))?(!)?: (.+)$")
+    private val breakingFooterPattern = Regex("^BREAKING(?: CHANGE|-CHANGE): (\\S.*)$")
+    private val footerPattern = Regex("^[A-Za-z][A-Za-z0-9-]*(?:: | #)\\S.*$")
+    private val markdownLinePattern = Regex("^\\s*(?:#{1,6}\\s|[-*+]\\s|\\d+[.)]\\s).*")
+    private val trailingPunctuation = ".,;:!?。，；：！？、…"
+    private val explanationPattern = Regex("(?i)^(?:explanation|here (?:is|are)|commit message|说明|解释|提交信息)[:： ].*")
 
-    /** Conventional Commits 基本格式：type 或 type(scope) 后接 subject */
-    private val formatRegex =
-        Regex("^(feat|fix|refactor|perf|style|docs|test|chore|ci|build)(\\([^)]+\\))?: .+")
-
-    /**
-     * 校验输出，合法则原样返回，空则回退，非法格式/非提交文本则抛异常（交上层重试）。
-     */
     fun validateOrFallback(message: String, intent: ScoredCommitIntent): String {
+        validateIntent(intent)
         val trimmed = message.trim()
         if (trimmed.isBlank()) return buildFallback(intent)
-        // 拦截代码块与 Markdown 标记
-        require(!trimmed.contains("```") && !trimmed.startsWith("#")) { "模型返回了非提交说明文本" }
-        require(trimmed.matches(formatRegex)) { "模型返回格式非法" }
+        require(!trimmed.contains("```") && !trimmed.contains("~~~") && !trimmed.startsWith("#")) {
+            "模型返回了非提交说明文本"
+        }
+        val lines = trimmed.replace("\r\n", "\n").split('\n')
+        val header = lines.first()
+        val parsed = headerPattern.matchEntire(header)
+        require(parsed != null) { "模型返回格式非法" }
+        val (type, scope, bang, subject) = parsed.destructured
+        require(type in CommitIntentRules.allowedTypes && type == intent.finalType &&
+            scope.ifEmpty { null } == intent.finalScope) { "提交类型或 scope 与意图不一致" }
+        require(header.length <= 72 && header.none { it.isISOControl() } &&
+            subject.isNotBlank() && subject == subject.trim() &&
+            subject.last() !in trailingPunctuation && subject.any { it.isLetterOrDigit() }) { "提交标题非法" }
+        require(!explanationPattern.matches(subject)) { "模型返回了非提交说明文本" }
+        require(lines.size == 1 || lines[1].isBlank()) { "正文或 footer 前必须有空行" }
+
+        var hasBreakingFooter = false
+        var hasBody = false
+        var inFooter = false
+        for ((index, line) in lines.withIndex().drop(2)) {
+            require(!explanationPattern.matches(line) && !markdownLinePattern.matches(line) &&
+                !headerPattern.matches(line)) { "模型返回了非提交说明文本" }
+            if (line.isBlank()) {
+                inFooter = false
+                continue
+            }
+            val canStartFooter = inFooter || lines[index - 1].isBlank()
+            if (line.startsWith("BREAKING CHANGE") || line.startsWith("BREAKING-CHANGE")) {
+                require(breakingFooterPattern.matches(line) && canStartFooter) {
+                    "BREAKING CHANGE footer 非法"
+                }
+                hasBreakingFooter = true
+                inFooter = true
+            } else if (footerPattern.matches(line) && canStartFooter) {
+                inFooter = true
+            } else if (!inFooter) {
+                hasBody = true
+            }
+        }
+        require(!hasBody || (intent.fallbackReason == null &&
+            (intent.why.isNotBlank() || intent.impact.isNotBlank()))) { "正文缺少已确认的原因或影响" }
+        val breaking = intent.isBreaking || intent.breakingChange.isNotBlank()
+        require((bang.isNotEmpty() || hasBreakingFooter) == breaking) { "破坏性变更标记与意图不一致" }
         return trimmed
     }
 
-    /** 基于修正后的意图构建保守回退文案 */
+    /** No inferred business claims; shorten only the supplied subject and keep its language. */
     fun buildFallback(intent: ScoredCommitIntent): String {
-        val scope = intent.finalScope?.let { "($it)" }.orEmpty()
-        return "${intent.finalType}$scope: ${intent.normalizedIntent}".trim()
+        validateIntent(intent)
+        val breaking = intent.isBreaking || intent.breakingChange.isNotBlank()
+        val prefix = buildString {
+            append(intent.finalType)
+            intent.finalScope?.let { append("($it)") }
+            if (breaking) append('!')
+            append(": ")
+        }
+        val available = 72 - prefix.length
+        require(available > 0) { "提交类型或 scope 过长" }
+        val original = intent.normalizedIntent.trim().replace(Regex("\\s+"), " ")
+        require(!original.contains("```") && !original.contains("~~~")) { "提交意图包含代码块" }
+        var subject = original.take(available)
+        if (subject.lastOrNull()?.isHighSurrogate() == true) subject = subject.dropLast(1)
+        subject = subject.trimEnd().trimEnd { it in trailingPunctuation }.trimEnd()
+        CommitIntentRules.requireSemanticIntent(subject)
+        val footer = intent.breakingChange.trim().replace(Regex("\\s+"), " ")
+        val fallback = prefix + subject + if (footer.isNotEmpty()) "\n\nBREAKING CHANGE: $footer" else ""
+        // Ensure fallback obeys the very same contract as generated output.
+        return validateOrFallback(fallback, intent)
+    }
+
+    private fun validateIntent(intent: ScoredCommitIntent) {
+        CommitIntentRules.requireSemanticIntent(intent.normalizedIntent)
+        require(intent.isBreaking || intent.breakingChange.isBlank()) { "破坏性变更标记与说明不一致" }
+        require(intent.finalType in CommitIntentRules.allowedTypes) { "提交类型非法" }
+        require(intent.finalScope == null || CommitIntentRules.validScope(intent.finalScope)) { "提交 scope 非法" }
     }
 }

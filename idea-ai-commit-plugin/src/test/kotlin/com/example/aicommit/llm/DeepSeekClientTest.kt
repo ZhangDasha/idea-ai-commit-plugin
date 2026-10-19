@@ -1,0 +1,166 @@
+package com.example.aicommit.llm
+
+import com.example.aicommit.action.CommitMessageWriteback
+import com.example.aicommit.git.PatchInput
+import com.example.aicommit.git.StructuredDiffBuilder
+import com.example.aicommit.model.ChangeStatus
+import com.example.aicommit.service.CommitGenerationRequest
+import com.example.aicommit.service.CommitIntentAnalysisService
+import com.example.aicommit.service.CommitMessageComposerService
+import com.example.aicommit.service.CommitMessageGenerationService
+import com.fasterxml.jackson.databind.ObjectMapper
+import com.intellij.openapi.progress.ProcessCanceledException
+import com.sun.net.httpserver.HttpServer
+import java.net.InetSocketAddress
+import java.net.SocketTimeoutException
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import kotlin.test.Test
+import kotlin.test.assertEquals
+import kotlin.test.assertFailsWith
+import kotlin.test.assertFalse
+import kotlin.test.assertTrue
+
+class DeepSeekClientTest {
+    private fun withServer(handler: (com.sun.net.httpserver.HttpExchange) -> Unit, test: (String) -> Unit) {
+        val server = HttpServer.create(InetSocketAddress("127.0.0.1", 0), 0)
+        val executor = Executors.newCachedThreadPool { Thread(it, "test-http").apply { isDaemon = true } }
+        server.executor = executor
+        server.createContext("/chat", handler)
+        server.start()
+        try { test("http://127.0.0.1:${server.address.port}/chat") }
+        finally { server.stop(0); executor.shutdownNow() }
+    }
+
+    @Test fun `stream delivers content on calling thread and stops at DONE`() {
+        val mapper = ObjectMapper()
+        var request = ""
+        withServer({ exchange ->
+            request = exchange.requestBody.bufferedReader().use { it.readText() }
+            val sse = "data: {\"choices\":[{\"delta\":{\"content\":\"fix: 修复取消\"}}]}\n\n" +
+                "data: [DONE]\n\ndata: not-json-after-done\n"
+            val bytes = sse.toByteArray(Charsets.UTF_8)
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }) { url ->
+            val caller = Thread.currentThread()
+            val chunks = mutableListOf<String>()
+            DeepSeekClient(checkCanceled = {}).streamChat(url, "secret", "model", "prompt", "system", 1000, 1000) {
+                assertEquals(caller, Thread.currentThread())
+                chunks.add(it)
+            }
+            assertEquals(listOf("fix: 修复取消"), chunks)
+            val json = mapper.readTree(request)
+            assertEquals("model", json["model"].asText())
+            assertEquals(0.2, json["temperature"].asDouble())
+            assertEquals("system", json["messages"][0]["content"].asText())
+            assertEquals("prompt", json["messages"][1]["content"].asText())
+        }
+    }
+
+    @Test fun `stream preserves standalone spaces and newlines`() {
+        val tokens = listOf("fix:", " ", "preserve", " ", "streaming", "\n\n", "Keep", " ", "body")
+        val mapper = ObjectMapper()
+        withServer({ exchange ->
+            exchange.requestBody.close()
+            val sse = tokens.joinToString("") { token ->
+                "data: ${mapper.writeValueAsString(mapOf("choices" to listOf(mapOf("delta" to mapOf("content" to token)))))}\r\n\r\n"
+            } + "data: [DONE]\r\n\r\n"
+            val bytes = sse.toByteArray(Charsets.UTF_8)
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }) { url ->
+            val actual = StringBuilder()
+            DeepSeekClient(checkCanceled = {}).streamChat(url, "key", "model", "prompt") { actual.append(it) }
+            assertEquals("fix: preserve streaming\n\nKeep body", actual.toString())
+        }
+    }
+
+    @Test fun `two stage generation streams validated message into commit document`() {
+        val mapper = ObjectMapper()
+        val requestedModels = mutableListOf<String>()
+        val intent = """{"typeCandidates":["fix"],"scopeCandidates":[],"intent":"preserve streaming whitespace","why":"","impact":"","confidence":0.9,"isBreaking":false,"breakingChange":""}"""
+        withServer({ exchange ->
+            val request = mapper.readTree(exchange.requestBody.bufferedReader().use { it.readText() })
+            val model = request["model"].asText()
+            requestedModels.add(model)
+            val tokens = if (model == "analysis") listOf(intent)
+                else listOf("fix:", " ", "preserve", " ", "streaming", " ", "whitespace", "\n")
+            val sse = tokens.joinToString("") { token ->
+                "data: ${mapper.writeValueAsString(mapOf("choices" to listOf(mapOf("delta" to mapOf("content" to token)))))}\n\n"
+            } + "data: [DONE]\n\n"
+            val bytes = sse.toByteArray(Charsets.UTF_8)
+            exchange.sendResponseHeaders(200, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }) { url ->
+            val client = DeepSeekClient(checkCanceled = {})
+            val service = CommitMessageGenerationService(
+                analysisService = CommitIntentAnalysisService(IntentAnalyzerClient(client)),
+                composer = CommitMessageComposerService(client),
+                checkCanceled = {}
+            )
+            val diff = StructuredDiffBuilder().buildFromPatch(listOf(PatchInput("src/Flow.kt",
+                ChangeStatus.MODIFIED, "@@ -1 +1 @@\n-blankToNull()\n+emptyToNull()\n")), 10, 3)
+            var document = "original"
+            val writeback = CommitMessageWriteback({ document }) { document = it }
+            writeback.update("正在分析代码变更…")
+            val streamed = StringBuilder()
+            val result = service.generate(CommitGenerationRequest(
+                diff, "English", url, "key", "analysis", "composer", 0.55
+            )) { chunk ->
+                streamed.append(chunk)
+                writeback.update(streamed.toString())
+            }
+            writeback.update(result)
+            assertEquals("fix: preserve streaming whitespace", document)
+            assertEquals(listOf("analysis", "composer"), requestedModels)
+        }
+    }
+
+    @Test fun `HTTP failures do not expose provider response`() {
+        withServer({ exchange ->
+            val bytes = "secret-source-and-api-key".toByteArray()
+            exchange.sendResponseHeaders(401, bytes.size.toLong())
+            exchange.responseBody.use { it.write(bytes) }
+        }) { url ->
+            val error = assertFailsWith<IllegalStateException> {
+                DeepSeekClient(checkCanceled = {}).streamChat(url, "secret", "model", "prompt", readTimeout = 1000) {}
+            }
+            assertTrue(error.message.orEmpty().contains("401"))
+            assertFalse(error.message.orEmpty().contains("secret"))
+        }
+    }
+
+    @Test fun `configured read timeout reaches stalled response`() {
+        withServer({ exchange ->
+            exchange.requestBody.close()
+            exchange.sendResponseHeaders(200, 0)
+            try { CountDownLatch(1).await(5, TimeUnit.SECONDS) }
+            finally { exchange.close() }
+        }) { url ->
+            assertFailsWith<SocketTimeoutException> {
+                DeepSeekClient(checkCanceled = {}).streamChat(url, "key", "model", "prompt", readTimeout = 150) {}
+            }
+        }
+    }
+
+    @Test fun `cancellation interrupts a stalled response before read timeout`() {
+        val started = CountDownLatch(1)
+        withServer({ exchange ->
+            exchange.requestBody.close()
+            exchange.sendResponseHeaders(200, 0)
+            started.countDown()
+            try { CountDownLatch(1).await(5, TimeUnit.SECONDS) }
+            finally { exchange.close() }
+        }) { url ->
+            val start = System.nanoTime()
+            assertFailsWith<ProcessCanceledException> {
+                DeepSeekClient(checkCanceled = {
+                    if (started.count == 0L) throw ProcessCanceledException()
+                }).streamChat(url, "key", "model", "prompt", readTimeout = 4000) {}
+            }
+            assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - start) < 2500)
+        }
+    }
+}

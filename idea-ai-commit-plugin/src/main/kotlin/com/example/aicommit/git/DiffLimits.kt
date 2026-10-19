@@ -9,5 +9,10 @@ package com.example.aicommit.git
 data class DiffLimits(
     val maxChars: Int = 100_000,
     val maxUnversionedBytes: Int = 20_000,
-    val contextLines: Int = 3
-)
+    val contextLines: Int = 3,
+    val processTimeoutMillis: Long = 30_000
+) {
+    init {
+        require(maxChars > 0 && maxUnversionedBytes > 0 && contextLines >= 0 && processTimeoutMillis > 0)
+    }
+}
