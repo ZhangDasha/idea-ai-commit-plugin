@@ -18,6 +18,6 @@ object AiCommitNotifications {
     }
 
     fun error(project: Project, content: String) {
-        group.createNotification(content, NotificationType.ERROR).notify(project)
+        group.createNotification("AI Commit 生成失败", content, NotificationType.ERROR).notify(project)
     }
 }
